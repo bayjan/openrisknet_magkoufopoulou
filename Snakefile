@@ -11,18 +11,18 @@ transcriptomics_data = "GSE28878_series_matrix_good_format.txt"
 compound_info = "Supplementary_Data_1.tsv"
 compound_info_zip = "supplementary_data.zip"
 compound_info_excel = "Supplementary_Data_1.xls"
+training_data_compound_info = "training_data_compound_info.tsv"
+validation_data_compound_info = "validation_data_compound_info.tsv"
+
 
 rule all:
     input:
-        compound_info, transcriptomics_data
+        compound_info, transcriptomics_data, training_data_compound_info, validation_data_compound_info
 
-rule line_counts:
-    output:
-        out_file
-    input:
-        in_file
-    shell:
-        "wc -l {input} > {output}"
+
+#####
+# Data collection and preparation part STARTS here
+#####
 
 rule collect_data:
     input:
@@ -60,3 +60,35 @@ rule compound_info_tsv:
         excel_file = pd.read_excel(io=str(input))
         excel_file.to_csv(path_or_buf=str(output), sep="\t")
 
+rule training_compound_info:
+    output:
+        training_data_compound_info
+    input:
+        compound_info
+    shell:
+        """
+        cut -f1,10- {input} |awk 'BEGIN{{print("compound\tgenotoxicity");}};NR>3'|head -35|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g; s/-//g; s/\]//g; s/\[//g' > {output}
+        """
+
+rule validation_compound_info:
+    output:
+        validation_data_compound_info
+    input:
+        compound_info
+    shell:
+        """
+        cut -f1,10- {input} |awk 'NR>41'|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g;  s/[[:punct:]]//g'|awk 'BEGIN{{print("compound\tgenotoxicity");}}{{print}}' > {output}
+        """
+        
+#####
+# Data collection and preparation part ENDS here
+#####
+
+#####
+# Analysis part STARTS here
+#####
+
+
+#####
+# Analysis part ENDS here
+#####
