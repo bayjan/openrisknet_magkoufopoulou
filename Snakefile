@@ -80,6 +80,17 @@ rule validation_compound_info:
         cut -f1,10- {input} |awk 'NR>41'|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g;  s/[[:punct:]]//g'|awk 'BEGIN{{print("compound\tgenotoxicity");}}{{print}}' > {output}
         """
         
+
+rule find_corresponding_series:
+    """Each series has different solvent, so find correct solvents"""
+    shell:
+        """
+        paste <(grep Sample_title GSE28878_series_matrix.txt|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id GSE28878_series_matrix.txt|cut -f2-|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h|sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g'|awk 'BEGIN{print("series_id\tcompound\treplicate\tarray_name");}{print}' > solvent_to_exposure.tsv
+        """
+
+rule calculate_log2_ratio:
+    """Calculate the correct log2ratio using the corresponding solvent for each replicate"""
+
 #####
 # Data collection and preparation part ENDS here
 #####
@@ -88,6 +99,8 @@ rule validation_compound_info:
 # Analysis part STARTS here
 #####
 
+# Accuracy is calculated differently
+rule calculate_accuracy:
 
 #####
 # Analysis part ENDS here
