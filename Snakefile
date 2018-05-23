@@ -13,7 +13,9 @@ compound_info_zip = "supplementary_data.zip"
 compound_info_excel = "Supplementary_Data_1.xls"
 training_data_compound_info = "training_data_compound_info.tsv"
 validation_data_compound_info = "validation_data_compound_info.tsv"
-
+log2ratio_results = "log2ratio_GSE28878_series.tsv"
+solvent2exposure = "solvent_to_exposure.tsv"
+solvent2exposure_mapping = "solvent_to_exposure_with_solvent_column.tsv"
 
 rule all:
     input:
@@ -83,13 +85,64 @@ rule validation_compound_info:
 
 rule find_corresponding_series:
     """Each series has different solvent, so find correct solvents"""
+    output:
+        solvent2exposure    
     shell:
         """
-        paste <(grep Sample_title GSE28878_series_matrix.txt|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id GSE28878_series_matrix.txt|cut -f2-|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h|sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g'|awk 'BEGIN{print("series_id\tcompound\treplicate\tarray_name");}{print}' > solvent_to_exposure.tsv
+        paste <(grep Sample_title transcriptomics_data_tmp1|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id transcriptomics_data_tmp1|cut -f2-|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h|sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g'|awk 'BEGIN{{print("series_id\tcompound\treplicate\tarray_name");}}{{print}}'|sed -re 's/\s+/\t/g' > {output}
         """
 
 rule calculate_log2_ratio:
-    """Calculate the correct log2ratio using the corresponding solvent for each replicate"""
+    """Calculate the correct log2ratio using the corresponding solvent for each replicate, values are already in log scale, so just subtract solvent values"""
+    output:
+        log2ratio_results, solvent2exposure_mapping
+    input:
+        transcriptomics_data, solvent2exposure    
+    run:
+        import pandas as pd
+        print("transcriptomics file is: " + input[0])
+        print("treatment2solvent file is: " + input[1])
+        transcr_df = pd.read_table(filepath_or_buffer=input[0])
+        solvent2exposure_df = pd.read_table(filepath_or_buffer = input[1])
+        # Find corresponding solvent ids for each compound
+        results_df = pd.DataFrame()
+        for val in solvent2exposure_df.series_id.drop_duplicates().values:
+            tmp = solvent2exposure_df.loc[solvent2exposure_df.series_id==val,:].query("compound.str.lower() in ['dmso','etoh','pbs']")
+            tmp.index=range(tmp.shape[0])          
+            tmp.columns = ['solvent_'+str(i) for i in tmp.columns]
+            compounds = solvent2exposure_df.loc[solvent2exposure_df.series_id==val,:].query("compound.str.lower() not in ['dmso','etoh','pbs']")['compound'].drop_duplicates()
+            for compound in compounds:
+                tmp1 = solvent2exposure_df.loc[solvent2exposure_df.series_id==val,:].query("compound=='"+str(compound)+"'")
+                tmp1.index = range(tmp1.shape[0])                
+                tmp2 = pd.concat([tmp1,tmp],axis=1, join='inner')
+                if results_df.shape[0] == 0:
+                    results_df = tmp2
+                else:
+                    results_df = results_df.append(tmp2)
+        results_df.to_csv(path_or_buf=str(output[1]), sep="\t")
+        # Calculate log2ratio
+        log2ratio_df = pd.DataFrame()
+        for compound in results_df['compound'].drop_duplicates().values:
+            for replicate in results_df[results_df['compound']==compound].replicate:
+                compound_array = results_df[results_df['compound']==compound].query('replicate=='+str(replicate)).array_name.values[0]
+                solvent_array  = results_df[results_df['compound']==compound].query('replicate=='+str(replicate)).solvent_array_name.values[0]
+                tmp3 = transcr_df.loc[:,compound_array] - transcr_df.loc[:,solvent_array]
+                tmp3.index = transcr_df.index
+                tmp3.columns = [compound_array]
+                if log2ratio_df.shape[0] == 0:
+                    log2ratio_df = tmp3
+                    log2ratio_df.columns = tmp3.columns
+                    log2ratio_df.index = tmp3.index
+                else:
+                    column_names = list(log2ratio_df.columns)
+                    column_names.append(compound_array)
+                    log2ratio_df = pd.concat([log2ratio_df,tmp3],axis=1)
+                    log2ratio_df.columns = column_names
+        column_names = list(log2ratio_df.columns)
+        column_names.insert(0,'ID_REF')
+        log2ratio_df = pd.concat([transcr_df['ID_REF'],log2ratio_df], axis=1)
+        log2ratio_df.columns = column_names
+        log2ratio_df.to_csv(path_or_buf=str(output[0]), sep="\t", index=False)
 
 #####
 # Data collection and preparation part ENDS here
@@ -98,6 +151,8 @@ rule calculate_log2_ratio:
 #####
 # Analysis part STARTS here
 #####
+rule t_test:
+    """Leave one out t-test is carried for every compound, by leaving out all replicates of a compound"""
 
 # Accuracy is calculated differently
 rule calculate_accuracy:
