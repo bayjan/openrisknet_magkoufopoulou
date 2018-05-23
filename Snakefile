@@ -16,6 +16,7 @@ validation_data_compound_info = "validation_data_compound_info.tsv"
 log2ratio_results = "log2ratio_GSE28878_series.tsv"
 solvent2exposure = "solvent_to_exposure.tsv"
 solvent2exposure_mapping = "solvent_to_exposure_with_solvent_column.tsv"
+compound_array_genotoxicity = "compound_array_genotoxicity_info.tsv"
 
 rule all:
     input:
@@ -69,7 +70,10 @@ rule training_compound_info:
         compound_info
     shell:
         """
-        cut -f1,10- {input} |awk 'BEGIN{{print("compound\tgenotoxicity");}};NR>3'|head -35|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g; s/-//g; s/\]//g; s/\[//g' > {output}
+        a=$(tempfile -d .)
+        cut -f1,10- {input} |awk 'BEGIN{{print("compound\tgenotoxicity");}};NR>3'|head -35 > $a;
+        sed -re 's/\+$/GTX/g; s/\-$/NGTX/g; s/-//g; s/\]//g; s/\[//g' $a > {output}
+        rm $a
         """
 
 rule validation_compound_info:
@@ -79,7 +83,10 @@ rule validation_compound_info:
         compound_info
     shell:
         """
-        cut -f1,10- {input} |awk 'NR>41'|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g;  s/[[:punct:]]//g'|awk 'BEGIN{{print("compound\tgenotoxicity");}}{{print}}' > {output}
+        a=$(tempfile -d .)
+        cut -f1,10- {input} |awk 'NR>41'|sed -re 's/\+$/GTX/g; s/\-$/NGTX/g;  s/[[:punct:]]//g' > $a;
+        awk 'BEGIN{{print("compound\tgenotoxicity");}}{{print}}' $a| sed -re 's/ppDDT\t/DDT\t/g; s/γHCH\t/HCH\t/g; s/\s+/\t/g'> {output}
+        rm $a
         """
         
 
@@ -89,7 +96,33 @@ rule find_corresponding_series:
         solvent2exposure    
     shell:
         """
-        paste <(grep Sample_title transcriptomics_data_tmp1|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id transcriptomics_data_tmp1|cut -f2-|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h|sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g'|awk 'BEGIN{{print("series_id\tcompound\treplicate\tarray_name");}}{{print}}'|sed -re 's/\s+/\t/g' > {output}
+        a=$(tempfile -d .)
+        b=$(tempfile -d .)
+        c=$(tempfile -d .)
+        d=$(tempfile -d .)
+        e=$(tempfile -d .)
+        paste <(grep Sample_title transcriptomics_data_tmp1|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id transcriptomics_data_tmp1 > $a;
+        cut -f2- $a|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h > $b;
+        sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g' $b > $c;
+        awk 'BEGIN{{print("series_id\tcompound\treplicate\tarray_name");}}{{print}}' $c|sed -re 's/\s+/\t/g' > $d; 
+        sed -re 's/DEPH/DEHP/g; s/Ethyl\t/EtAc\t/g; s/NPD\t/NDP\t/g; s/Paracres\t/pCres\t/g; s/Phenol\t/Ph\t/g; s/Resor/RR/g' $d > $e;
+        sed -re 's/2-Cl\t/2Cl\t/g' $e> {output}
+        rm $a $b $c $d $e
+        """
+
+rule compound_array_mapping:
+    """Creates a file that stores a mapping between genotoxicity, compound and array information"""
+    output:
+        compound_array_genotoxicity
+    input:
+        validation_data_compound_info, training_data_compound_info, solvent2exposure
+    shell:
+        """
+        a=$(tempfile -d .)
+        echo -e "series_id\tcompound\treplicate\tarray_name\tgenotoxicity" > {output}; 
+        LANG=en_EN join -i -o 2.1,2.2,2.3,2.4,2.5,1.2 -t $'\t' -1 1 -2 2 <(cat {validation_data_compound_info} {training_data_compound_info}|sort -k1.1i,1.3i  -t $'\t' ) <(LANG=en_EN sort -fbi -t $'\t' -k 2 {solvent2exposure}) > $a;
+        grep -iv genotoxicity $a >> {output};
+        rm $a;
         """
 
 rule calculate_log2_ratio:
@@ -143,6 +176,7 @@ rule calculate_log2_ratio:
         log2ratio_df = pd.concat([transcr_df['ID_REF'],log2ratio_df], axis=1)
         log2ratio_df.columns = column_names
         log2ratio_df.to_csv(path_or_buf=str(output[0]), sep="\t", index=False)
+
 
 #####
 # Data collection and preparation part ENDS here
