@@ -3,6 +3,7 @@ out_file = "line_counts.txt"
 
 # Followings are inputs
 # transcriptomics_data_url = "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE28878&format=file"
+# transcriptomics_raw_file = "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE28nnn/GSE28878/suppl/GSE28878_RAW.tar"
 transcriptomics_data_url = "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE28nnn/GSE28878/matrix/GSE28878_series_matrix.txt.gz"
 compound_info_url = "https://oup.silverchair-cdn.com/oup/backfile/Content_public/Journal/carcin/33/7/10.1093_carcin_bgs182/2/bgs182_Supplementary_Data.zip?Expires=1526557830&Signature=1fvEwy7yzkeqHPknk~X82ScOyQmXDQonDM1UpOdp~y~rQUBThynLmfKCQymB-4~hplt0S~UGbYcTkCdwm0bpJgNxbG2Pmnk1A6oIq9mw-4QLu-5OEqzHEmOcKFqYXrt7UocogQ0~0aLYeKDt6-o3aN8~xLS5rWK2wrYso6VUZ~vJWd80BE4F7BFn5Wib4ToCbXE4HJFa10PXFJGV-cOnk3zAgSY5kK-YOiO2SuqEg22JE-hizmIczYC1As5u3BPu~5nGogMIJ5genwNOIWsAYO-bdeOO~OM3vv5BfnsXDj8Ec5-MFL5CShupQDX16xQuxXDBoS9RZZv2qSfErz-Czg__&Key-Pair-Id=APKAIE5G5CRDK6RD3PGA"
 
@@ -14,6 +15,9 @@ compound_info_excel = "Supplementary_Data_1.xls"
 training_data_compound_info = "training_data_compound_info.tsv"
 validation_data_compound_info = "validation_data_compound_info.tsv"
 log2ratio_results = "log2ratio_GSE28878_series.tsv"
+filtered_log2ratio = "filtered" + log2ratio_results
+filtered_pma_table = "filtered_PMA_table.tsv"
+
 solvent2exposure = "solvent_to_exposure.tsv"
 solvent2exposure_mapping = "solvent_to_exposure_with_solvent_column.tsv"
 compound_array_genotoxicity_val = "compound_array_genotoxicity_val_info.tsv"
@@ -24,6 +28,13 @@ sample2treatment = "sample2treatment_info.tsv"
 
 ### The following output are from the analysis steps
 signif_genes_ttest = "signif_genes_count_after_ttest.txt"
+pam_workdir = "data/interim/pam/"
+accuracy_info_training = "pam_accuracy_training_data.tsv"
+accuracy_info_validation = "pam_accuracy_validation_data.tsv"
+training_pam_results = "pam_training_predictions.tsv"
+validation_pam_results = "pam_validation_predictions.tsv"
+training_pam_results_corr_prop = "pam_training_predictions_corr_prop.tsv"
+validation_pam_results_corr_prop = "pam_validation_predictions_corr_prop.tsv"
 
 rule all:
     input:
@@ -174,7 +185,7 @@ rule calculate_log2_ratio:
                     results_df = tmp2
                 else:
                     results_df = results_df.append(tmp2)
-        results_df.to_csv(path_or_buf=str(output[1]), sep="\t")
+        results_df.to_csv(path_or_buf=str(output[1]), sep="\t", index=False)
         # Calculate log2ratio
         log2ratio_df = pd.DataFrame()
         for compound in results_df['compound'].drop_duplicates().values:
@@ -199,12 +210,28 @@ rule calculate_log2_ratio:
         log2ratio_df.columns = column_names
         log2ratio_df.to_csv(path_or_buf=str(output[0]), sep="\t", index=False)
 
+#rule PMA_values:
+#    """This rule retrieves PMA information for every gene"""
+#   shell:
+#       "cut -f5,9 solvent_to_exposure_with_solvent_column.tsv|grep GSM|tr '\t' '\n'|sort|uniq > /tmp/magko/24h_array_names.txt"
+
+
+rule filter_absent_genes:
+    output:
+        filtered_pma_table, filtered_log2ratio
+    input:
+        log2ratio_results, solvent2exposure_mapping
+    shell:
+        """
+        python ./src/pma_table/presence_absence_pma_table.py `pwd`/data/interim/PMAtable_217_arrays.tsv {solvent2exposure_mapping} {filtered_pma_table} {log2ratio_results} {filtered_log2ratio}
+        """
+
 rule create_training_data:
     """Create a training data, where 2nd row contains genotoxicity information"""
     output:
         training_data
     input:
-        log2ratio_results, compound_array_genotoxicity_train
+        filtered_log2ratio, compound_array_genotoxicity_train
     run:
         import pandas as pd
         log2ratio_df = pd.read_table(filepath_or_buffer=input[0])
@@ -221,18 +248,21 @@ rule create_training_data:
         gtx_info_cols = list(gtx_info.keys())
         gtx_info_cols.sort()
         gtx_info_classes = [gtx_info[i] for i in gtx_info_cols]
-        gtx_info_cols.insert(0,arrays_ids[0]) # To be R like 1st column of the 2ns row should also be empty
-        gtx_info_classes.insert(0,"")
+        gtx_info_cols.insert(0,arrays_ids[0])
+        gtx_info_classes.insert(0,"class")
         training_data_df = pd.DataFrame([gtx_info_classes],columns=gtx_info_cols)
         training_data_df = training_data_df.append(log2ratio_df.loc[:,gtx_info_cols])
-        training_data_df.to_csv(path_or_buf=str(output),sep="\t", index=False)
+        # For later reading in R, do not give a label for the first column
+        col_names = list(training_data_df.columns[1:])
+        col_names.insert(0,"")
+        training_data_df.to_csv(path_or_buf=str(output),sep="\t", index=False, header=col_names)
 
 rule create_validation_data:
     """Create a training data, where 2nd row contains genotoxicity information"""
     output:
         validation_data
     input:
-        log2ratio_results, compound_array_genotoxicity_val
+        filtered_log2ratio, compound_array_genotoxicity_val
     run:
         import pandas as pd
         log2ratio_df = pd.read_table(filepath_or_buffer=input[0])
@@ -249,11 +279,15 @@ rule create_validation_data:
         gtx_info_cols = list(gtx_info.keys())
         gtx_info_cols.sort()
         gtx_info_classes = [gtx_info[i] for i in gtx_info_cols]
-        gtx_info_cols.insert(0,arrays_ids[0]) # To be R like 1st column of the 2ns row should also be empty
-        gtx_info_classes.insert(0,"")
+        gtx_info_cols.insert(0,arrays_ids[0])
+        gtx_info_classes.insert(0,"class")
         val_data_df = pd.DataFrame([gtx_info_classes],columns=gtx_info_cols)
         val_data_df = val_data_df.append(log2ratio_df.loc[:,gtx_info_cols])
-        val_data_df.to_csv(path_or_buf=str(output),sep="\t", index=False)
+        # For later reading in R, do not give a label for the first column
+        col_names = list(val_data_df.columns[1:])
+        col_names.insert(0,"")
+
+        val_data_df.to_csv(path_or_buf=str(output),sep="\t", index=False, header=col_names)
 
 rule sample2treatment:
     """This file is needed for leave one out R script"""
@@ -273,19 +307,6 @@ rule sample2treatment:
         rm $a $b;
         """
 
-# The following command might be needed in sample2treatment rule instead of the current one
-#join -j 1 -t $'\t' <(head -1 training_data_with_class_info.tsv|tr '\t' '\n'|grep -i gsm|sort) <(grep -iv sample sample2treatment_info.tsv|sort)|awk 'BEGIN{print("SampleName\tTreatmentGroup")}{print}' > sample2treatment_info_train.tsv
-
-rule signif_genes_ttest:
-    output:
-        signif_genes_ttest
-    input:
-        training_data, validation_data, sample2treatment
-    shell:
-        """
-        R --file=./src/R/leave_one_out_t_test.R --args `pwd` `pwd`/data/interim/ {training_data} {validation_data} {sample2treatment}
-        wc -l `pwd`/data/interim/*train_ttest.txt|awk-v s=`pwd`  '{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}' > {output}
-        """
 
 
 #####
@@ -295,11 +316,42 @@ rule signif_genes_ttest:
 #####
 # Analysis part STARTS here
 #####
-rule t_test:
+rule signif_genes_ttest:
     """Leave one out t-test is carried for every compound, by leaving out all replicates of a compound"""
+    output:
+        signif_genes_ttest
+    input:
+        training_data, validation_data, sample2treatment
+    shell:
+        """
+        R --file=./src/R/leave_one_out_t_test.R --args `pwd` `pwd`/data/interim/ {training_data} {validation_data} {sample2treatment}
+        wc -l `pwd`/data/interim/*train_ttest.txt|awk -v s=`pwd`  '{{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}}' > {output}
+        """
+
+rule pam_analysis:
+    """Does PAM classification analysis on training data and then tests on the validation data"""
+    input:
+        training_data, validation_data
+    shell:
+        """
+        sed -re 's/\s+/\t""\t/' `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest.txt |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest_forPAM.txt
+        sed -re 's/\s+/\t""\t/' `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest.txt |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest_forPAM.txt
+        R --file=./src/R/pam_classification.R --args `pwd`/{pam_workdir} `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest_forPAM.txt `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest_forPAM.txt
+        """
 
 # Accuracy is calculated differently
 rule calculate_accuracy:
+    output:
+        training_pam_results, validation_pam_results, accuracy_info_training, accuracy_info_validation, training_pam_results_corr_prop, validation_pam_results_corr_prop
+    input:
+        solvent2exposure_mapping
+    shell:
+        """
+        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input}|sort -k2) <(sort data/interim/pam/training_actual_predicted_pam.tsv )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[0]}
+        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input}|sort -k2) <(sort data/interim/pam/test_actual_predicted_pam.tsv )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[1]}
+        R --file=./src/R/calculate_accuracy.R --args `pwd`/{output[0]} `pwd`/{output[2]} `pwd`/{output[4]}
+        R --file=./src/R/calculate_accuracy.R --args `pwd`/{output[1]} `pwd`/{output[3]} `pwd`/{output[5]}
+        """
 
 #####
 # Analysis part ENDS here
