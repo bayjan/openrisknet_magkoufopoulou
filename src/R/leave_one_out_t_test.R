@@ -3,11 +3,20 @@
 # M.L.J. Coonen, dpt. Toxicogenomics, Maastricht University
 
 args = commandArgs(trailingOnly=TRUE);
+if(length(args)!=7){
+  print(args)
+  print("Please specify locations of: sourcedir, outputdir, training_file, validation_file, groups_file, training_file_only_signif_genes, validation_file_only_signif_genes with --args option of R");
+  print("There must be at least 5 arguments specified. Quitting!");
+  quit(save = "no", status = -1, runLast = TRUE);
+}
+
 sourcedir = args[1];
 outputdir = args[2];
 filename.train = args[3];
 filename.test = args[4];
 filename.groups = args[5];
+training_file_only_signif_genes = args[6];
+validation_file_only_signif_genes = args[7];
 
 #filename.groups <- "exp_groups_clinchem_MD-ND.txt"	# A tab-delim file containing in first column 'SampleName' and in second column 'TreatmentGroup'
            				
@@ -203,19 +212,19 @@ if(train.or.test == 2 | train.or.test == 3) {
 
 if(train.or.test == 1 | train.or.test == 3) {
 	# # Write output files
-	write.table(training.LogRatios.selected.sig.aov, paste("clinchem_8_m_MD-ND_train_", statmethod, ".txt", sep=""), sep="\t", col.names=NA)
+	write.table(training.LogRatios.selected.sig.aov, training_file_only_signif_genes, sep="\t", col.names=NA)
 }
 if(train.or.test == 2 | train.or.test == 3) {
-	write.table(validation.LogRatios.selected.sig.aov, paste("clinchem_8_m_MD-ND_test_", statmethod, ".txt", sep=""), sep="\t", col.names=NA)
+	write.table(validation.LogRatios.selected.sig.aov, validation_file_only_signif_genes, sep="\t", col.names=NA)
 }
 	
 cat("done\n")
 cat("Please check the output directory for the following files:\n")
 if(train.or.test == 1 | train.or.test == 3) {	
-	cat(paste("- clinchem_8_m_MD-ND_train_", statmethod, ".txt\n", sep=""))
+	cat(paste(getwd(),"/",training_file_only_signif_genes,sep=""));
 }
 if(train.or.test == 2 | train.or.test == 3) {	
-	cat(paste("- clinchem_8_m_MD-ND_test_", statmethod, ".txt\n", sep=""))
+	cat(paste(getwd(),"/",validation_file_only_signif_genes,sep=""));
 }
 
 

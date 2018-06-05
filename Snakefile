@@ -8,6 +8,7 @@ transcriptomics_data_url = "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE28nnn/GSE28
 compound_info_url = "https://oup.silverchair-cdn.com/oup/backfile/Content_public/Journal/carcin/33/7/10.1093_carcin_bgs182/2/bgs182_Supplementary_Data.zip?Expires=1526557830&Signature=1fvEwy7yzkeqHPknk~X82ScOyQmXDQonDM1UpOdp~y~rQUBThynLmfKCQymB-4~hplt0S~UGbYcTkCdwm0bpJgNxbG2Pmnk1A6oIq9mw-4QLu-5OEqzHEmOcKFqYXrt7UocogQ0~0aLYeKDt6-o3aN8~xLS5rWK2wrYso6VUZ~vJWd80BE4F7BFn5Wib4ToCbXE4HJFa10PXFJGV-cOnk3zAgSY5kK-YOiO2SuqEg22JE-hizmIczYC1As5u3BPu~5nGogMIJ5genwNOIWsAYO-bdeOO~OM3vv5BfnsXDj8Ec5-MFL5CShupQDX16xQuxXDBoS9RZZv2qSfErz-Czg__&Key-Pair-Id=APKAIE5G5CRDK6RD3PGA"
 
 # Followings are outputs from different steps
+transcriptomics_data_tmp1 = "transcriptomics_data_tmp1"
 transcriptomics_data = "GSE28878_series_matrix_good_format.txt"
 compound_info = "Supplementary_Data_1.tsv"
 compound_info_zip = "supplementary_data.zip"
@@ -28,7 +29,14 @@ sample2treatment = "sample2treatment_info.tsv"
 
 ### The following output are from the analysis steps
 signif_genes_ttest = "signif_genes_count_after_ttest.txt"
+signif_genes_workdir = "data/interim/"
+training_data_only_signif_genes = signif_genes_workdir + "clinchem_8_m_MD-ND_train_ttest.txt"
+validation_data_only_signif_genes = signif_genes_workdir + "clinchem_8_m_MD-ND_test_ttest.txt"
 pam_workdir = "data/interim/pam/"
+training_data_after_pam = signif_genes_workdir + "clinchem_8_m_MD-ND_train_ttest_forPAM.txt"
+validation_data_after_pam = signif_genes_workdir +  "clinchem_8_m_MD-ND_test_ttest_forPAM.txt"
+pam_training_actual_predicted = signif_genes_workdir + "pam/training_actual_predicted_pam.tsv"
+pam_validation_actual_predicted = signif_genes_workdir + "pam/test_actual_predicted_pam.tsv"
 accuracy_info_training = "pam_accuracy_training_data.tsv"
 accuracy_info_validation = "pam_accuracy_validation_data.tsv"
 training_pam_results = "pam_training_predictions.tsv"
@@ -38,7 +46,7 @@ validation_pam_results_corr_prop = "pam_validation_predictions_corr_prop.tsv"
 
 rule all:
     input:
-        compound_info, transcriptomics_data, training_data_compound_info, validation_data_compound_info
+        compound_info, transcriptomics_data, training_data_compound_info, validation_data_compound_info,  accuracy_info_training, accuracy_info_validation
 
 
 #####
@@ -53,7 +61,7 @@ rule collect_data:
 
 rule get_transcriptomics_data:
     output:
-        transcriptomics_data
+        transcriptomics_data, transcriptomics_data_tmp1
     shell:
         """
         curl -X GET "{transcriptomics_data_url}" > transcriptomics_data_tmp1.gz
@@ -66,8 +74,10 @@ rule get_compound_info:
     """This command retrieves the archive file & then only extracts the Excel file we need"""
     output:
         compound_info_excel
+    input:
+        compound_info_url, compound_info_zip
     shell:
-        'curl -X GET "{compound_info_url}" > {compound_info_zip} && unzip {compound_info_zip} {compound_info_excel}'
+        'curl -X GET "{input[0]}" > {input[1]} && unzip {input[1]} {output}'
 
 rule compound_info_tsv:
     output:
@@ -111,7 +121,9 @@ rule validation_compound_info:
 rule find_corresponding_series:
     """Each series has different solvent, so find correct solvents"""
     output:
-        solvent2exposure    
+        solvent2exposure
+    input:
+        transcriptomics_data_tmp1
     shell:
         """
         a=$(tempfile -d .)
@@ -119,7 +131,7 @@ rule find_corresponding_series:
         c=$(tempfile -d .)
         d=$(tempfile -d .)
         e=$(tempfile -d .)
-        paste <(grep Sample_title transcriptomics_data_tmp1|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id transcriptomics_data_tmp1 > $a;
+        paste <(grep Sample_title {input}|cut -f2-|tr -d '"'|tr '\t' '\n') <(grep Series_sample_id {input} > $a;
         cut -f2- $a|tr -d '"'|sed -re 's/\s*$//'|tr ' ' '\n')|grep 24h > $b;
         sed -re 's/^Serie\s*//g; s/, HepG2 exposed to\s*/\t/g; s/for 24h, biological rep\s*/\t/g' $b > $c;
         awk 'BEGIN{{print("series_id\tcompound\treplicate\tarray_name");}}{{print}}' $c|sed -re 's/\s+/\t/g' > $d; 
@@ -138,10 +150,11 @@ rule compound2array_val:
         """
         a=$(tempfile -d .)
         echo -e "series_id\tcompound\treplicate\tarray_name\tgenotoxicity" > {output}; 
-        LANG=en_EN join -i -o 2.1,2.2,2.3,2.4,1.2 -t $'\t' -1 1 -2 2 <(cat {validation_data_compound_info} |sort -k1.1i,1.3i  -t $'\t' ) <(LANG=en_EN sort -fbi -t $'\t' -k 2 {solvent2exposure}) > $a;
+        LANG=en_EN join -i -o 2.1,2.2,2.3,2.4,1.2 -t $'\t' -1 1 -2 2 <(cat {input[0]} |sort -k1.1i,1.3i  -t $'\t' ) <(LANG=en_EN sort -fbi -t $'\t' -k 2 {input[1]}) > $a;
         grep -iv genotoxicity $a >> {output};
         rm $a;
         """
+
 rule compound2array_train:
     """Creates a file that stores a mapping between genotoxicity, compound and array information for training set"""
     output:
@@ -152,7 +165,7 @@ rule compound2array_train:
         """
         a=$(tempfile -d .)
         echo -e "series_id\tcompound\treplicate\tarray_name\tgenotoxicity" > {output}; 
-        LANG=en_EN join -i -o 2.1,2.2,2.3,2.4,1.2 -t $'\t' -1 1 -2 2 <(cat {training_data_compound_info}|sort -k1.1i,1.3i  -t $'\t' ) <(LANG=en_EN sort -fbi -t $'\t' -k 2 {solvent2exposure}) > $a;
+        LANG=en_EN join -i -o 2.1,2.2,2.3,2.4,1.2 -t $'\t' -1 1 -2 2 <(cat {input[0]}|sort -k1.1i,1.3i  -t $'\t' ) <(LANG=en_EN sort -fbi -t $'\t' -k 2 {input[1]}) > $a;
         grep -iv genotoxicity $a >> {output};
         rm $a;
         """
@@ -220,10 +233,10 @@ rule filter_absent_genes:
     output:
         filtered_pma_table, filtered_log2ratio
     input:
-        log2ratio_results, solvent2exposure_mapping
+        solvent2exposure_mapping, log2ratio_results
     shell:
         """
-        python ./src/pma_table/presence_absence_pma_table.py `pwd`/data/interim/PMAtable_217_arrays.tsv {solvent2exposure_mapping} {filtered_pma_table} {log2ratio_results} {filtered_log2ratio}
+        python ./src/pma_table/presence_absence_pma_table.py `pwd`/data/interim/PMAtable_217_arrays.tsv {input[0]} {output[0]} {input[1]} {output[1]}
         """
 
 rule create_training_data:
@@ -319,24 +332,26 @@ rule sample2treatment:
 rule signif_genes_ttest:
     """Leave one out t-test is carried for every compound, by leaving out all replicates of a compound"""
     output:
-        signif_genes_ttest
+        signif_genes_ttest, training_data_only_signif_genes, validation_data_only_signif_genes
     input:
-        training_data, validation_data, sample2treatment
+        training_data, validation_data, sample2treatment, signif_genes_workdir
     shell:
         """
-        R --file=./src/R/leave_one_out_t_test.R --args `pwd` `pwd`/data/interim/ {training_data} {validation_data} {sample2treatment}
-        wc -l `pwd`/data/interim/*train_ttest.txt|awk -v s=`pwd`  '{{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}}' > {output}
+        R --file=./src/R/leave_one_out_t_test.R --args `pwd` `pwd`/{input[3]} {input[0]} {input[1]} {input[2]} `pwd`/{output[1]} `pwd`/{output[2]}
+        wc -l `pwd`/{output[1]}|awk -v s=`pwd`  '{{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}}' > {output[0]}
         """
 
 rule pam_analysis:
     """Does PAM classification analysis on training data and then tests on the validation data"""
+    output:
+        training_data_after_pam, validation_data_after_pam, pam_training_actual_predicted, pam_validation_actual_predicted
     input:
-        training_data, validation_data
+        training_data_only_signif_genes, validation_data_only_signif_genes, pam_workdir
     shell:
         """
-        sed -re 's/\s+/\t""\t/' `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest.txt |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest_forPAM.txt
-        sed -re 's/\s+/\t""\t/' `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest.txt |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest_forPAM.txt
-        R --file=./src/R/pam_classification.R --args `pwd`/{pam_workdir} `pwd`/data/interim/clinchem_8_m_MD-ND_train_ttest_forPAM.txt `pwd`/data/interim/clinchem_8_m_MD-ND_test_ttest_forPAM.txt
+        sed -re 's/\s+/\t""\t/' `pwd`/{input[0]} |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/{output[0]}
+        sed -re 's/\s+/\t""\t/' `pwd`/{input[1]} |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/{output[1]}
+        R --file=./src/R/pam_classification.R --args `pwd`/{input[2]} `pwd`/{output[0]} `pwd`/{output[1]}  `pwd`/{output[2]} `pwd`/{output[3]}
         """
 
 # Accuracy is calculated differently
@@ -344,11 +359,11 @@ rule calculate_accuracy:
     output:
         training_pam_results, validation_pam_results, accuracy_info_training, accuracy_info_validation, training_pam_results_corr_prop, validation_pam_results_corr_prop
     input:
-        solvent2exposure_mapping
+        solvent2exposure_mapping, pam_training_actual_predicted, pam_validation_actual_predicted
     shell:
         """
-        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input}|sort -k2) <(sort data/interim/pam/training_actual_predicted_pam.tsv )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[0]}
-        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input}|sort -k2) <(sort data/interim/pam/test_actual_predicted_pam.tsv )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[1]}
+        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input[0]}|sort -k2) <(sort {input[1]} )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[0]}
+        join -1 2 -2 1 -t $'\t' <(cut -f2,4 {input[0]}|sort -k2) <(sort {input[2]} )|awk 'BEGIN{{print("array_name\tcompound\tactual\tpredicted");}}{{print}}' > {output[1]}
         R --file=./src/R/calculate_accuracy.R --args `pwd`/{output[0]} `pwd`/{output[2]} `pwd`/{output[4]}
         R --file=./src/R/calculate_accuracy.R --args `pwd`/{output[1]} `pwd`/{output[3]} `pwd`/{output[5]}
         """

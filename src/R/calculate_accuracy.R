@@ -15,7 +15,7 @@ predictions_report_file = args[3];
 print("Parameters passed are")
 print(args)
 # R code
-df=read.table("test_compound_pam.tsv",sep="\t",header=T)
+df=read.table(file=predictions_results_file,sep="\t",header=T)
 comps = as.character(unique(df[,2]))
 corectly_predicted = c()
 m=matrix(ncol=4,nrow=0)
@@ -40,7 +40,7 @@ tp=length(which(m[which(m[,2]=="GTX"),3]=="GTX"))
 fn=length(which(m[which(m[,3]=="NGTX"),2]=="GTX"))
 fp=length(which(m[which(m[,3]=="GTX"),2]=="NGTX"))
 tn=length(which(m[which(m[,3]=="NGTX"),2]=="NGTX"))
-accuracy = length(corectly_predicted)/nrow(df)
+accuracy = length(corectly_predicted)/length(comps)
 sensitivity=tp/(tp+fn)
 specifity=tn/(tn+fp)
 fnr=1-sensitivity
