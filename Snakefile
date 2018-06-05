@@ -338,7 +338,7 @@ rule signif_genes_ttest:
     shell:
         """
         R --file=./src/R/leave_one_out_t_test.R --args `pwd` `pwd`/{input[3]} {input[0]} {input[1]} {input[2]} `pwd`/{output[1]} `pwd`/{output[2]}
-        wc -l `pwd`/{output[1]}|awk -v s=`pwd`  '{{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}}' > {output[0]}
+        wc -l `pwd`/{output[1]}|awk -v s=`pwd`  '{{print("In total "$1-2" significant genes were found & results are here "s"/data/interim/")}}' > {output[0]}        
         """
 
 rule pam_analysis:
@@ -346,12 +346,14 @@ rule pam_analysis:
     output:
         training_data_after_pam, validation_data_after_pam, pam_training_actual_predicted, pam_validation_actual_predicted
     input:
-        training_data_only_signif_genes, validation_data_only_signif_genes, pam_workdir
+        training_data_only_signif_genes, validation_data_only_signif_genes
     shell:
         """
+        echo "Creating pam_workdir={pam_workdir} and the PAM classification results will be stored there"
+        mkdir -pv {pam_workdir}
         sed -re 's/\s+/\t""\t/' `pwd`/{input[0]} |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/{output[0]}
         sed -re 's/\s+/\t""\t/' `pwd`/{input[1]} |sed -n '2s/^"[[:alpha:]]*"/""/;p' > `pwd`/{output[1]}
-        R --file=./src/R/pam_classification.R --args `pwd`/{input[2]} `pwd`/{output[0]} `pwd`/{output[1]}  `pwd`/{output[2]} `pwd`/{output[3]}
+        R --file=./src/R/pam_classification.R --args `pwd`/{pam_workdir} `pwd`/{output[0]} `pwd`/{output[1]}  `pwd`/{output[2]} `pwd`/{output[3]}
         """
 
 # Accuracy is calculated differently
