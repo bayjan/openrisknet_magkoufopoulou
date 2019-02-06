@@ -82,3 +82,10 @@ Required ``R`` version and its packages:
 Required data:
 - PMA table file, located at: ./data/interim/PMAtable_217_arrays.tsv
 - Supplementary_Data_1.xls file, our pipeline can download the supplementary_data.zip from the publisher's site. However, they can block your IP if you run this script multiple times. So, we provide the only Excel file from that supplementary files.
+ 
+
+The following command creates a directed acyclic graph (DAG) of jobs (shown below) in the Snakemake file:
+`snakemake --dag | dot -Tpng > snakemake_dag.png`
+
+
+
