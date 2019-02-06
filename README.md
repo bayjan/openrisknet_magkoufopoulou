@@ -87,5 +87,6 @@ Required data:
 The following command creates a directed acyclic graph (DAG) of jobs (shown below) in the Snakemake file:
 `snakemake --dag | dot -Tpng > snakemake_dag.png`
 
+![jobs_dag_file](snakemake_dag.png)
 
 
